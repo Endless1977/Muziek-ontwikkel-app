@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stemkastje</title>
+<style>
+:root{--bg:#0f1117;--panel:#171a23;--panel2:#1e2230;--line:#2b3042;--text:#e7e9f0;--muted:#8d93a8;--accent:#f5a524;--ok:#3ddc84;--warn:#ffb020;--bad:#ff5d5d}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]){--bg:#f4f5f8;--panel:#fff;--panel2:#f0f2f7;--line:#dde1ea;--text:#1a1d26;--muted:#646b80;--accent:#d9820a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;justify-content:center}
+.wrap{width:100%;max-width:420px;padding:16px;display:flex;flex-direction:column;gap:12px}
+h1{font-size:17px;margin:0;display:flex;align-items:center;gap:8px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px}
+.meter{position:relative;text-align:center}
+svg{width:100%;height:auto;display:block}
+.note{font-size:64px;font-weight:700;line-height:1;margin-top:-6px}
+.note sub{font-size:22px;color:var(--muted);font-weight:500}
+.freq{color:var(--muted);font-variant-numeric:tabular-nums}
+.hint{margin-top:6px;font-weight:600;min-height:20px}
+.strings{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+.str{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:8px 0;cursor:pointer;text-align:center;color:var(--text);font:inherit}
+.str b{display:block;font-size:17px}.str span{font-size:11px;color:var(--muted)}
+.str.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.str.hit{background:var(--ok);color:#052;border-color:var(--ok)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+select,input,button{font:inherit;color:inherit}
+select,input{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px 8px}
+input[type=number]{width:72px}
+.btn{border:1px solid var(--line);background:var(--panel2);padding:8px 14px;border-radius:9px;cursor:pointer}
+.btn.accent{background:var(--accent);border-color:var(--accent);color:#111;font-weight:600}
+.muted{color:var(--muted);font-size:12px}
+.level{height:6px;background:var(--panel2);border-radius:99px;overflow:hidden}
+.level div{height:100%;width:0;background:var(--ok)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="row" style="justify-content:space-between">
+    <h1>🎸 Stemkastje</h1>
+    <button class="btn accent" id="start">Microfoon aan</button>
+  </div>
+
+  <div class="card meter">
+    <svg viewBox="0 0 300 160" aria-hidden="true">
+      <g id="ticks"></g>
+      <rect x="140" y="20" width="20" height="8" rx="3" id="zone" fill="var(--ok)" opacity=".35"/>
+      <line id="needle" x1="150" y1="150" x2="150" y2="30" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/>
+      <circle cx="150" cy="150" r="8" fill="var(--accent)"/>
+      <text x="22" y="150" fill="var(--muted)" font-size="12">−50</text>
+      <text x="258" y="150" fill="var(--muted)" font-size="12">+50</text>
+    </svg>
+    <div class="note" id="note">–</div>
+    <div class="freq" id="freq">Klik op “Microfoon aan” en sla een snaar aan</div>
+    <div class="hint" id="hint"></div>
+    <div class="level" style="margin-top:10px"><div id="lvl"></div></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <select id="tuning"></select>
+      <label class="row muted">A4 = <input type="number" id="a4" min="415" max="466" value="440"> Hz</label>
+    </div>
+    <div class="strings" id="strings"></div>
+    <div class="row" style="margin-top:10px;justify-content:space-between">
+      <label class="row muted"><input type="checkbox" id="auto" checked> Automatisch snaar herkennen</label>
+      <label class="row muted"><input type="checkbox" id="ref"> Referentietoon bij klik</label>
+    </div>
+    <p class="muted" style="margin:8px 0 0">Klik op een snaar om die als doel te kiezen. Met referentietoon hoor je de juiste toonhoogte.</p>
+  </div>
+</div>
+
+<script>
+'use strict';
+const $=s=>document.querySelector(s);
+const NAMES=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+// MIDI-nummers per snaar, laag → hoog
+const TUNINGS={
+  'Standaard (E A D G B E)':[40,45,50,55,59,64],
+  'Drop D (D A D G B E)':[38,45,50,55,59,64],
+  'Halve toon lager (E♭)':[39,44,49,54,58,63],
+  'D standaard':[38,43,48,53,57,62],
+  'Drop C':[36,43,48,53,57,62],
+  'Open G (D G D G B D)':[38,43,50,55,59,62],
+  'Open D (D A D F♯ A D)':[38,45,50,54,57,62],
+  'DADGAD':[38,45,50,55,57,62]
+};
+let a4=440,target=null,ac,an,buf,running=false,hist=[];
+const freqOf=m=>a4*Math.pow(2,(m-69)/12);
+const nameOf=m=>NAMES[((m%12)+12)%12];
+
+$('#tuning').innerHTML=Object.keys(TUNINGS).map(k=>`<option>${k}</option>`).join('');
+function renderStrings(){
+  const t=TUNINGS[$('#tuning').value];
+  $('#strings').innerHTML=t.map((m,i)=>`<button class="str ${target===i?'on':''}" data-i="${i}"><b>${nameOf(m)}</b><span>${6-i}e · ${Math.floor(m/12)-1}</span></button>`).join('');
+  document.querySelectorAll('.str').forEach(b=>b.onclick=()=>{
+    const i=+b.dataset.i;target=(target===i&&$('#auto').checked)?null:i;
+    if(target!==null)$('#auto').checked=false;
+    if($('#ref').checked)refTone(freqOf(TUNINGS[$('#tuning').value][i]));
+    renderStrings();
+  });
+}
+$('#tuning').onchange=()=>{target=null;$('#auto').checked=true;renderStrings();};
+$('#auto').onchange=e=>{if(e.target.checked){target=null;renderStrings();}};
+$('#a4').onchange=e=>{a4=Math.min(466,Math.max(415,+e.target.value||440));e.target.value=a4;};
+renderStrings();
+
+// schaalverdeling
+(function(){let h='';for(let c=-50;c<=50;c+=10){const a=c/50*60*Math.PI/180,x1=150+Math.sin(a)*112,y1=150-Math.cos(a)*112,x2=150+Math.sin(a)*(c%50===0?96:102),y2=150-Math.cos(a)*(c%50===0?96:102);
+  h+=`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="var(--line)" stroke-width="${c===0?3:2}"/>`;}$('#ticks').innerHTML=h;})();
+
+function setNeedle(cents){
+  const c=Math.max(-50,Math.min(50,cents)),a=c/50*60;
+  $('#needle').setAttribute('transform',`rotate(${a.toFixed(1)} 150 150)`);
+  const col=Math.abs(cents)<=5?'var(--ok)':Math.abs(cents)<=15?'var(--warn)':'var(--bad)';
+  $('#needle').setAttribute('stroke',col);
+}
+
+function refTone(f){
+  if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();
+  ac.resume();
+  const o=ac.createOscillator(),g=ac.createGain(),t=ac.currentTime;
+  o.type='triangle';o.frequency.value=f;
+  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(0.25,t+0.02);g.gain.exponentialRampToValueAtTime(0.001,t+2.2);
+  o.connect(g).connect(ac.destination);o.start(t);o.stop(t+2.3);
+}
+
+$('#start').onclick=async()=>{
+  if(running){stopMic();return;}
+  try{
+    if(!ac)ac=new (window.AudioContext||window.webkitAudioContext)();
+    await ac.resume();
+    const stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+    const src=ac.createMediaStreamSource(stream);
+    an=ac.createAnalyser();an.fftSize=4096;src.connect(an);
+    buf=new Float32Array(an.fftSize);
+    running=true;window._stream=stream;
+    $('#start').textContent='Microfoon uit';$('#freq').textContent='Sla een snaar aan…';
+    loop();
+  }catch(e){$('#freq').textContent='Geen toegang tot de microfoon: '+e.message;}
+};
+function stopMic(){
+  running=false;if(window._stream)window._stream.getTracks().forEach(t=>t.stop());
+  $('#start').textContent='Microfoon aan';$('#lvl').style.width='0';
+}
+
+// Autocorrelatie-toonhoogte (geschikt voor 60–1200 Hz)
+function detect(b,sr){
+  let n=b.length,rms=0;for(let i=0;i<n;i++)rms+=b[i]*b[i];rms=Math.sqrt(rms/n);
+  $('#lvl').style.width=Math.min(100,rms*400)+'%';
+  if(rms<0.008)return -1;
+  const minL=Math.floor(sr/1200),maxL=Math.min(Math.floor(sr/60),Math.floor(n/2));
+  const c=new Float32Array(maxL+2);
+  for(let L=0;L<=maxL+1;L++){let s=0;for(let i=0;i<n-L;i++)s+=b[i]*b[i+L];c[L]=s;}
+  let d=minL;while(d<maxL&&c[d]>c[d+1])d++;
+  let best=-1,bl=-1;for(let L=d;L<=maxL;L++)if(c[L]>best){best=c[L];bl=L;}
+  if(bl<1||best<c[0]*0.3)return -1;
+  // voorkom octaaffouten: neem de eerste piek die bijna even sterk is als de sterkste
+  for(let L=d+1;L<bl;L++){if(c[L]>c[L-1]&&c[L]>=c[L+1]&&c[L]>=best*0.9){bl=L;break;}}
+  const x1=c[bl-1],x2=c[bl],x3=c[bl+1],a=(x1+x3-2*x2)/2,bb=(x3-x1)/2;
+  const T=a?bl-bb/(2*a):bl;
+  return sr/T;
+}
+let last=0;
+function loop(){
+  if(!running)return;
+  requestAnimationFrame(loop);
+  const now=performance.now();if(now-last<45)return;last=now;
+  an.getFloatTimeDomainData(buf);
+  const f=detect(buf,ac.sampleRate);
+  if(f<0){hist=[];return;}
+  hist.push(f);if(hist.length>5)hist.shift();
+  const fs=[...hist].sort((a,b)=>a-b)[Math.floor(hist.length/2)];
+  const tun=TUNINGS[$('#tuning').value];
+  let midi,cents;
+  if(target!==null){midi=tun[target];cents=1200*Math.log2(fs/freqOf(midi));}
+  else{
+    const exact=69+12*Math.log2(fs/a4);midi=Math.round(exact);cents=(exact-midi)*100;
+  }
+  $('#note').innerHTML=`${nameOf(midi)}<sub>${Math.floor(midi/12)-1}</sub>`;
+  $('#freq').textContent=`${fs.toFixed(1)} Hz · doel ${freqOf(midi).toFixed(1)} Hz · ${cents>=0?'+':''}${cents.toFixed(0)} cent`;
+  setNeedle(cents);
+  const hint=$('#hint');
+  if(Math.abs(cents)>300)hint.textContent='Ver weg van de gekozen snaar';
+  else if(Math.abs(cents)<=5)hint.textContent='✓ Gestemd';
+  else hint.textContent=cents<0?'↑ Iets hoger draaien (aanspannen)':'↓ Iets lager draaien (ontspannen)';
+  hint.style.color=Math.abs(cents)<=5?'var(--ok)':'';
+  document.querySelectorAll('.str').forEach((b,i)=>b.classList.toggle('hit',tun[i]===midi&&Math.abs(cents)<=5));
+}
+</script>
+</body>
+</html>
