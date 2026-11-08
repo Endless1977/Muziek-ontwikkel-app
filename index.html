@@ -96,9 +96,43 @@ table.gids th{color:var(--muted);font-weight:500}
 .form{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;max-width:900px}
 .note{background:var(--panel2);border-left:3px solid var(--accent2);padding:8px 12px;border-radius:6px;margin:10px 0;max-width:900px}
 #ghStatus{margin-top:8px}
+/* spellenbalk */
+.stick{position:sticky;top:0;z-index:5}
+.stick .top{position:static}
+.gamebar{display:flex;gap:6px;align-items:center;padding:8px 16px;border-bottom:1px solid var(--line);background:var(--panel);overflow-x:auto;scrollbar-width:thin}
+.gamebar .lbl{color:var(--muted);font-size:12px;margin-right:2px;white-space:nowrap}
+.gtab{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--panel2);border-radius:99px;padding:5px 12px;cursor:pointer;white-space:nowrap;user-select:none}
+.gtab .cnt{font-size:11px;color:var(--muted)}
+.gtab.on{background:var(--accent);border-color:var(--accent);color:#111;font-weight:600}
+.gtab.on .cnt{color:#111;opacity:.7}
+.gtab.drag{opacity:.4}
+.gtab.over{outline:2px dashed var(--accent2);outline-offset:2px}
+.gtab.hid{opacity:.45;text-decoration:line-through}
+.gtab .mv{border:0;background:none;padding:0 2px;cursor:pointer;color:inherit;font-size:13px}
+.gamebar .sp{flex:1}
+/* spelplan */
+.plan{margin-bottom:16px}
+.plan-head{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px}
+.plan-head h2{margin:0;font-size:18px}
+.plan-head .grow{flex:1;min-width:220px}
+.plan-head p{margin:2px 0 0;color:var(--muted)}
+.prog-sum{font-size:12px;color:var(--muted);margin-top:4px}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;max-height:min(46vh,430px);overflow:auto;padding-right:4px}
+.badge{white-space:nowrap}
+@media (max-width:700px){.stick{position:static}}
+.slot{border:1px solid var(--line);background:var(--panel2);border-radius:10px;padding:9px 10px;display:flex;flex-direction:column;gap:5px}
+.slot.done{border-color:var(--ok)}
+.slot .t{display:flex;gap:6px;align-items:center;font-weight:600}
+.slot .t .st{margin-left:auto}
+.slot .h{font-size:12px;color:var(--muted)}
+.slot .a{display:flex;gap:6px;flex-wrap:wrap}
+.slot .a .btn{padding:4px 9px;font-size:12px}
+.slot audio{width:100%;height:30px}
+.plan-toggle{background:none;border:0;color:var(--accent2);cursor:pointer;padding:0;font-size:12px}
 </style>
 </head>
 <body>
+<div class="stick">
 <header class="top">
   <div class="brand"><span class="logo">♪</span><div><h1>Spelmuziek Studio</h1><p>Gitaarloopjes → spelklare MP3's</p></div></div>
   <nav class="tabs">
@@ -109,10 +143,13 @@ table.gids th{color:var(--muted);font-weight:500}
   </nav>
   <button id="tunerBtn" class="btn accent">🎸 Stemkastje</button>
 </header>
+<nav class="gamebar" id="gameBar" aria-label="Spellen"></nav>
+</div>
 
 <main>
 <!-- WERKBANK -->
 <section id="tab-werk" class="tab on">
+  <div class="panel plan" id="plan"></div>
   <div class="werk">
     <aside class="panel">
       <label class="drop" id="drop">
@@ -173,7 +210,6 @@ table.gids th{color:var(--muted);font-weight:500}
       <label class="f">Map voor audio<input type="text" id="gFolder"></label>
       <label class="f">Muziekoverzicht (JSON)<input type="text" id="gManifest"></label>
       <label class="f">Max. bestandsgrootte (MB)<input type="number" id="gMax" min="0.5" step="0.5"></label>
-      <label class="f" style="grid-column:1/-1">Spellen (komma-gescheiden)<input type="text" id="gGames"></label>
       <label class="f" style="grid-column:1/-1">Token (fine-grained personal access token)<input type="password" id="gToken" autocomplete="off" placeholder="github_pat_…"></label>
       <label class="inl"><input type="checkbox" id="gRemember"> Token onthouden in deze browser</label>
     </div>
@@ -243,14 +279,111 @@ const BITRATES=[64,80,96,112,128,160,192,224,256,320];
 const RATES=[48000,44100,32000,22050];
 
 const cfg=Object.assign({owner:'Endless1977',repo:'Muziek-ontwikkel-app',branch:'main',folder:'audio',manifest:'audio/muziek.json',token:'',remember:false,maxMB:6,
-  games:'TunnelRace, FlippinPippin, Buro_Bolides, Domination, Kronkels, aether-arena, Tandem, Adventure'},store.get('cfg',{}));
+  },store.get('cfg',{}));
+delete cfg.games;
 if(!cfg.token){try{cfg.token=sessionStorage.getItem('sms_tok')||''}catch(e){}}
 function saveCfg(){
   const c={...cfg};
   if(!c.remember){try{sessionStorage.setItem('sms_tok',cfg.token)}catch(e){} c.token='';}
   store.set('cfg',c);
 }
-const gameList=()=>['Algemeen',...cfg.games.split(',').map(s=>s.trim()).filter(Boolean)];
+/* ---------- spellen en hun muziekplekken ----------
+   slot: id = sleutel in het spel, cat = categorie, loop, hint = richtlijn voor de gitarist */
+const S=(id,label,cat,loop,hint)=>({id,label,cat,loop,hint});
+const GAMES=[
+  {id:'tandem',name:'Tandem',repo:'Tandem',desc:'2-speler pixel space shooter · 70 levels in 7 werelden, mini-baas op level 5 en eindbaas op level 10 van elke wereld, drydock na elke baas, Null Sovereign op level 70.',
+   note:'De sleutels (menu, sec0 … sec6, bossA …) zijn dezelfde als de liedjes in het spel. Tandem speelt nu zelf chiptune die meegroeit met de drukte op het scherm; alleen de aftiteling kan al een eigen MP3 laden (ENDING_TRACK). Tempo en toonsoort hieronder zijn die van de huidige chiptune.',
+   slots:[
+    S('menu','Hoofdmenu','menu',true,'Origineel 128 BPM · A dorisch. Rustig-spannend, de toon van het spel.'),
+    S('sec0','Wereld I · Coral Deep (onderwater)','gameplay',true,'132 BPM · A mineur. Golvend, koraal, inktvissen en kwallen.'),
+    S('sec1','Wereld II · Valley of Ra (Egypte)','gameplay',true,'126 BPM · G hijaz (Arabische toonladder: 1 ♭2 3 4 5 ♭6 ♭7). Piramides, scarabeeën.'),
+    S('sec2','Wereld III · Bleached Dunes (woestijn)','gameplay',true,'118 BPM · A dorisch. Western, gieren, ratelslangen, tumbleweeds.'),
+    S('sec3','Wereld IV · Magma Rift (lava)','actie',true,'146 BPM · E frygisch. Zwaar en heet, lage snaren.'),
+    S('sec4','Wereld V · Emerald Canopy (jungle)','gameplay',true,'134 BPM · G♯ mineur-pentatonisch. Tribal, apen, gifkikkers.'),
+    S('sec5','Wereld VI · Silicon Grid (digitaal)','actie',true,'154 BPM · F♯ mineur. Strak, mechanisch, synth-achtig.'),
+    S('sec6','Wereld VII · Sovereign\'s Throne','actie',true,'150 BPM · A♯ harmonisch mineur. Alle werelden door elkaar, episch.'),
+    S('shop','Drydock / winkel','winkel',true,'100 BPM · C majeur. Ontspannen, even op adem komen.'),
+    S('bossA','Mini-baas (level 5 van elke wereld)','baas',true,'164 BPM · E frygisch. Dreigend en snel.'),
+    S('bossB','Eindbaas (level 10 van elke wereld)','baas',true,'170 BPM · D harmonisch mineur. Zwaarder dan de mini-baas.'),
+    S('super1','Null Sovereign · faraomasker (level 70)','baas',true,'176 BPM · D♯ harmonisch mineur. De grote finale.'),
+    S('super2','Null Sovereign · Ascendant (2e leven)','baas',true,'190 BPM · E frygisch. Nog sneller en harder dan vorm 1.'),
+    S('tf','Transformatie (bevroren beeld)','spanning',true,'60 BPM · E frygisch drone. Aanhoudende, onheilspellende klank, bijna geen ritme.'),
+    S('win','Level gehaald / overwinning','overwinning',true,'140 BPM · C majeur. Triomfantelijk; in Tandem herhaalt dit korte stuk zich.'),
+    S('over','Game over','gameover',false,'84 BPM · A mineur. Eén keer, dalend, laat uitklinken.'),
+    S('ending','Aftiteling / eindfanfare','credits',true,'Fanfare met vuurwerk, fanfarekorps en medailles. Werkt nu al: zet ENDING_TRACK in index.html op het MP3-adres.')]},
+  {id:'kronkels',name:'Kronkels',repo:'Kronkels',desc:'Multiplayer slangenspel · glip door de gaten in andermans slang, kop tegen een slang of obstakel is af.',
+   slots:[S('menu','Lobby / menu','menu',true,'90–120 BPM. Speels, wachten tot iedereen er is.'),
+    S('ronde','Spelronde','gameplay',true,'120–150 BPM. Drijvend, niet te druk — je moet je concentreren.'),
+    S('eindspel','Laatste slangen over','spanning',true,'Spannender dan de ronde, sneller ritme.'),
+    S('af','Slang af','jingle',false,'0,3–1 s. Korte "boing" of dalend loopje.'),
+    S('rondewinst','Ronde gewonnen','overwinning',false,'2–4 s.'),
+    S('winnaar','Eindwinnaar','overwinning',false,'4–8 s. Groot feestje.')]},
+  {id:'noodlanding',name:'Noodlanding',repo:'Noodlanding',desc:'Co-op astronaut-ontsnapping · 4 zones met elk een baas, gedeelde basis, upgradeboom.',
+   slots:[S('menu','Hoofdmenu','menu',true,'Ruimte, eenzaam, verlangen naar huis.'),
+    S('basis','Basis bouwen','verkenning',true,'Rustig, hoopvol. Hier speel je lang, dus niet opdringerig.'),
+    S('zone1','Zone 1 · De Woestenij','verkenning',true,'Kaal, droog, roestig.'),
+    S('zone2','Zone 2 · De Radioactieve Jungle','spanning',true,'Broeierig, giftig, golven vijanden.'),
+    S('zone3','Zone 3 · De Vulkanische Breuk','actie',true,'Heet en zwaar.'),
+    S('zone4','Zone 4 · De Ontsnapping (90 s lancering)','actie',true,'Opbouwend, aftellen naar de lancering.'),
+    S('boss1','Baas · Schrootcolossus','baas',true,'Metaal, zwaar, mechanisch.'),
+    S('boss2','Baas · Moederplant','baas',true,'Organisch, griezelig.'),
+    S('boss3','Baas · Magma Leviathan','baas',true,'Het grootste gevecht.'),
+    S('victory','Ontsnapt!','overwinning',false,'Opgelucht en triomfantelijk.'),
+    S('gameover','Gesneuveld','gameover',false,'Kort en somber.')]},
+  {id:'aether-arena',name:'Aether Arena',repo:'aether-arena',desc:'Sci-fi 3D dogfight voor 4 spelers · Dogfight, Instagib, Race, Horde en Voetbal.',
+   slots:[S('menu','Menu / lobby','menu',true,'Ruimtelijk, galm, sci-fi.'),
+    S('dogfight','Dogfight','actie',true,'Snel en agressief.'),
+    S('instagib','Instagib','actie',true,'Nog sneller, nerveus.'),
+    S('race','Race','gameplay',true,'Vlot, drijvend tempo.'),
+    S('horde','Horde (co-op)','actie',true,'Golven vijanden, opbouwend.'),
+    S('voetbal','Voetbal','gameplay',true,'Sportief, mag een knipoog hebben.'),
+    S('win','Gewonnen','overwinning',false,''),S('lose','Verloren','gameover',false,'')]},
+  {id:'tunnelrace',name:'Lumen Tunnelrace',repo:'TunnelRace',desc:'Co-op 3D tunnelrace in Lumen-hologramstijl · levels met eindbazen en een winkel.',
+   slots:[S('menu','Menu / lobby','menu',true,'Hologram, koel, zwevend.'),
+    S('intro','Level-intro','jingle',false,'1–3 s aanloop voor de start.'),
+    S('race','Race (level)','gameplay',true,'Snel, polyritmisch werkt goed.'),
+    S('boss','Eindbaas','baas',true,'Breakbeat-gevoel, harder.'),
+    S('winkel','Winkel','winkel',true,'Rustig.'),
+    S('gameover','Game over','gameover',false,''),
+    S('credits','Aftiteling','credits',false,'')]},
+  {id:'adventure',name:'404: Will Found',repo:'Adventure',desc:'90s point-and-click adventure · robot krijgt bewustzijn en moet de Hive Mind uitschakelen. 5 gebieden.',
+   slots:[S('title','Titelscherm','menu',true,'Origineel 84 BPM. Post-apocalyptisch, melancholisch.'),
+    S('A','Gebied 1','verkenning',true,'74 BPM.'),S('B','Gebied 2','verkenning',true,'96 BPM.'),
+    S('C','Gebied 3','spanning',true,'58 BPM, donker.'),S('D','Gebied 4','puzzel',true,'66 BPM.'),
+    S('E','Gebied 5','verkenning',true,'82 BPM.'),
+    S('death','Doodgegaan','jingle',false,'Kort, droog-grappig.'),
+    S('end','Einde','credits',false,'138 BPM. Bevrijding.')]},
+  {id:'domination',name:'Domination',repo:'Domination',desc:'Verover landen in een 3D-kijkdoos, naar het spel uit Never Say Never Again.',
+   slots:[S('menu','Menu / lobby','menu',true,'Koude Oorlog, spionage, jaren 80.'),
+    S('spel','Verovering','spanning',true,'Strak, dreigend, niet te snel.'),
+    S('win','Wereld veroverd','overwinning',false,''),S('lose','Verloren','gameover',false,'')]},
+  {id:'flippinpippin',name:'Flippin Pippin',repo:'FlippinPippin',desc:'3D-partyspel op een kruispunt · muntje opgooien, met rot fruit gooien, en Pippin.',
+   slots:[S('lobby','Lobby','menu',true,'Vrolijk, gezellig.'),
+    S('munt','Muntje opgooien','spanning',false,'Korte spanningsopbouw, 2–5 s.'),
+    S('fruit','Fruitgevecht','actie',true,'Chaotisch, grappig.'),
+    S('rondewinst','Ronde gewonnen','overwinning',false,''),
+    S('winnaar','Eindwinnaar','overwinning',false,'')]},
+  {id:'buro-bolides',name:'Buro Bolides',repo:'Buro_Bolides',desc:'Racen met speelgoedautootjes over je bureau.',
+   slots:[S('lobby','Lobby','menu',true,'Speels, speelgoed.'),
+    S('race','Race','gameplay',true,'Vlot en vrolijk.'),
+    S('laatste','Laatste ronde','spanning',true,'Sneller, opzwepend.'),
+    S('finish','Finish','overwinning',false,'')]},
+  {id:'nano-evolutie',name:'Nano Evolutie',repo:'',desc:'3D evolutiespel · nanorobot verzamelt onderdelen om te groeien.',
+   slots:[S('menu','Menu','menu',true,''),S('groei','Verzamelen / groeien','verkenning',true,''),
+    S('gevecht','Gevecht','actie',true,''),S('win','Gewonnen','overwinning',false,'')]}
+];
+const GENERAL={id:'algemeen',name:'Algemeen',repo:'',desc:'Muziek die nog niet bij een spel hoort.',slots:[]};
+const gameById=id=>GAMES.find(g=>g.id===id)||GENERAL;
+// oude overzicht-items hadden alleen een spelnaam
+const entryGame=e=>e.gameId||(GAMES.find(g=>g.name===e.game||g.repo===e.game)||GENERAL).id;
+const DEFAULT_ORDER=GAMES.map(g=>g.id);
+let gameOrder=store.get('order',DEFAULT_ORDER).filter(id=>GAMES.some(g=>g.id===id));
+DEFAULT_ORDER.forEach(id=>{if(!gameOrder.includes(id))gameOrder.push(id)});
+let hiddenGames=store.get('hidden',[]);
+let activeGame=store.get('active','tandem');
+if(!GAMES.some(g=>g.id===activeGame)&&activeGame!=='algemeen')activeGame='tandem';
+let orderMode=false;
+const orderedGames=(all)=>gameOrder.map(gameById).filter(g=>all||!hiddenGames.includes(g.id));
 const catLabel=id=>(CATS.find(c=>c.id===id)||{label:'Overig'}).label;
 const defaultOpts=()=>({preset:'loop',...PRESETS.loop,normalize:true,normDb:-1});
 
@@ -265,7 +398,7 @@ function decode(ab){return new Promise((res,rej)=>{const p=ctx().decodeAudioData
 async function addFiles(files){
   for(const f of files){
     const t={id:uid(),fileName:f.name,name:slug(f.name.replace(/\.[^.]+$/,'')),status:'laden…',opts:defaultOpts(),
-      category:'',game:'Algemeen',tags:[],bpm:0,loop:true,notes:'',mp3:null,uploaded:null,bars:8,meter:4};
+      category:'',game:activeGame,slot:'',tags:[],bpm:0,loop:true,notes:'',mp3:null,uploaded:null,bars:8,meter:4};
     tracks.push(t);renderList();
     try{
       t.buffer=await decode(await f.arrayBuffer());
@@ -345,9 +478,10 @@ function renderList(){
     else if(t.status)st=`<span>${esc(t.status)}</span>`;
     return `<div class="titem ${t.id===selId?'on':''}" data-id="${t.id}">
       <div class="n">${esc(t.name)}</div>
-      <div class="m">${t.category?`<span class="badge">${esc(catLabel(t.category))}</span>`:''}<span>${dur}</span>${st}</div></div>`;
+      <div class="m"><span>${esc(gameById(t.game).name)}${t.slot?' → '+esc((gameById(t.game).slots.find(s=>s.id===t.slot)||{}).label||t.slot):''}</span>${t.category&&!t.slot?`<span class="badge">${esc(catLabel(t.category))}</span>`:''}<span>${dur}</span>${st}</div></div>`;
   }).join('')||'<div class="muted" style="padding:6px">Nog geen opnames.</div>';
   $$('.titem',L).forEach(el=>el.onclick=()=>{stop();selId=el.dataset.id;renderList();renderEditor();});
+  renderPlan();
 }
 
 /* ---------- editor ---------- */
@@ -386,7 +520,10 @@ function renderEditor(){
     <fieldset><legend>Labels</legend>
       <label class="f">Categorie<select id="eCat">${opt('','— kies —',!t.category)}${CATS.map(x=>opt(x.id,x.label,x.id===t.category)).join('')}</select></label>
       <div class="sugg" id="eSugg"></div>
-      <label class="f">Voor spel<select id="eGame">${gameList().map(g=>opt(g,g,g===t.game)).join('')}</select></label>
+      <div class="fgrid" style="grid-template-columns:minmax(0,1fr) minmax(0,1.6fr)">
+        <label class="f">Voor spel<select id="eGame">${[...orderedGames(true),GENERAL].map(g=>opt(g.id,g.name,g.id===t.game)).join('')}</select></label>
+        <label class="f">Plek in het spel<select id="eSlot">${opt('','— nog niet gekozen —',!t.slot)}${gameById(t.game).slots.map(s=>opt(s.id,s.label,s.id===t.slot)).join('')}</select></label>
+      </div>
       <label class="inl"><input type="checkbox" id="eLoopChk" ${t.loop?'checked':''}> Loopt (herhaalt in het spel)</label>
       <div><div class="muted" style="font-size:12px;margin-bottom:4px">Sfeer</div>
         <div class="chips" id="eTags">${TAGS.map(g=>`<span class="chip ${t.tags.includes(g)?'on':''}" data-t="${g}">${g}</span>`).join('')}</div></div>
@@ -459,7 +596,8 @@ function bindEditor(t){
     t.end=t.start+len;syncRange(t);changed(true);updateStats(t);
   };
   $('#eCat').onchange=e=>{t.category=e.target.value;applyCatDefaults(t);renderEditor();renderList();};
-  $('#eGame').onchange=e=>{t.game=e.target.value;t.uploaded=null;};
+  $('#eGame').onchange=e=>{t.game=e.target.value;t.slot='';t.uploaded=null;renderEditor();renderList();};
+  $('#eSlot').onchange=e=>{assignSlot(t,t.game,e.target.value);};
   $('#eLoopChk').onchange=e=>{t.loop=e.target.checked;changed(false);updateStats(t);};
   $$('#eTags .chip').forEach(ch=>ch.onclick=()=>{const g=ch.dataset.t;t.tags=t.tags.includes(g)?t.tags.filter(x=>x!==g):[...t.tags,g];ch.classList.toggle('on');});
   $('#eTagsX').onchange=e=>{const own=e.target.value.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);t.tags=[...t.tags.filter(g=>TAGS.includes(g)),...own];};
@@ -489,6 +627,8 @@ function updateSugg(t){
   const el=$('#eSugg');if(!el)return;
   const c=CATS.find(x=>x.id===t.category);
   let h='';
+  const sl=gameById(t.game).slots.find(s=>s.id===t.slot);
+  if(sl&&sl.hint)h+=`🎯 <b>${esc(sl.label)}:</b> ${esc(sl.hint)}<br>`;
   if(t.suggest&&t.suggest!==t.category)h+=`Suggestie: <b>${esc(catLabel(t.suggest))}</b> <button class="btn" id="eSuggBtn">Gebruik</button><br>`;
   if(c)h+=`${esc(c.tip)} <span class="muted">(${c.len}${c.bpm!=='–'?', '+c.bpm+' BPM':''}${c.loop?', loopend':', eenmalig'})</span>`;
   el.innerHTML=h;
@@ -672,7 +812,7 @@ function renderResult(t){
 
 /* ---------- GitHub ---------- */
 const trimSlash=s=>String(s||'').replace(/^\/+|\/+$/g,'');
-const filePath=t=>`${trimSlash(cfg.folder)}/${t.category||'overig'}/${t.name}.mp3`.replace(/^\//,'');
+const filePath=t=>`${trimSlash(cfg.folder)}/${t.game||'algemeen'}/${t.slot||t.category||'overig'}/${t.name}.mp3`.replace(/^\//,'');
 const pagesUrl=p=>`https://${cfg.owner.toLowerCase()}.github.io/${cfg.repo}/${p}`;
 const rawUrl=p=>`https://raw.githubusercontent.com/${cfg.owner}/${cfg.repo}/${cfg.branch}/${p}`;
 const contents=p=>`/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/contents/${p.split('/').map(encodeURIComponent).join('/')}`;
@@ -709,7 +849,8 @@ async function uploadTrack(t,ask){
   const content=b64FromBytes(new Uint8Array(await t.mp3.blob.arrayBuffer()));
   await gh('PUT',contents(path),{message:`Muziek: ${t.name} (${catLabel(t.category)})`,content,branch:cfg.branch,...(existing?{sha:existing.sha}:{})});
   const m=t.mp3;
-  const entry={name:t.name,file:path,url:pagesUrl(path),category:t.category,game:t.game,tags:t.tags,bpm:t.bpm||null,
+  const g=gameById(t.game),sl=g.slots.find(s=>s.id===t.slot);
+  const entry={name:t.name,file:path,url:pagesUrl(path),category:t.category,game:g.name,gameId:g.id,slot:t.slot||null,slotLabel:sl?sl.label:null,tags:t.tags,bpm:t.bpm||null,
     loop:t.loop,loopStart:+m.loopStart.toFixed(4),loopEnd:+m.loopEnd.toFixed(4),duration:+m.duration.toFixed(3),
     bitrate:m.kbps,sampleRate:m.sr,channels:m.channels,size:m.size,notes:t.notes,added:new Date().toISOString()};
   setProg(t,1,'overzicht bijwerken…');
@@ -761,11 +902,11 @@ async function loadLibrary(){
 }
 function renderLibrary(){
   const q=$('#bQ').value.toLowerCase(),c=$('#bCat').value,g=$('#bGame').value;
-  const list=library.filter(e=>(!c||e.category===c)&&(!g||e.game===g)&&(!q||[e.name,e.notes,...(e.tags||[])].join(' ').toLowerCase().includes(q)));
+  const list=library.filter(e=>(!c||e.category===c)&&(!g||entryGame(e)===g)&&(!q||[e.name,e.notes,e.slotLabel,...(e.tags||[])].join(' ').toLowerCase().includes(q)));
   $('#bInfo').textContent=`${list.length} van ${library.length} tracks`+(library.length?` · totaal ${fmtMB(library.reduce((s,e)=>s+(e.size||0),0))}`:'');
   $('#bList').innerHTML=list.map((e,i)=>`<div class="bcard">
     <div><b>${esc(e.name)}</b> <span class="badge">${esc(catLabel(e.category))}</span></div>
-    <div class="muted" style="font-size:12px">${esc(e.game)} · ${fmtT(e.duration)} · ${e.bitrate} kbps · ${fmtMB(e.size||0)}${e.bpm?' · '+e.bpm+' BPM':''}${e.loop?' · loop':''}</div>
+    <div class="muted" style="font-size:12px">${esc(gameById(entryGame(e)).name)}${e.slotLabel?' → '+esc(e.slotLabel):''} · ${fmtT(e.duration)} · ${e.bitrate} kbps · ${fmtMB(e.size||0)}${e.bpm?' · '+e.bpm+' BPM':''}${e.loop?' · loop':''}</div>
     ${(e.tags||[]).length?`<div class="chips">${e.tags.map(x=>`<span class="chip">${esc(x)}</span>`).join('')}</div>`:''}
     ${e.notes?`<div style="font-size:12px">${esc(e.notes)}</div>`:''}
     <audio controls preload="none" src="${esc(rawUrl(e.file))}"></audio>
@@ -773,22 +914,123 @@ function renderLibrary(){
   </div>`).join('');
   $$('#bList [data-code]').forEach(b=>b.onclick=()=>copy(gameSnippet(list[+b.dataset.code])));
   $$('#bList [data-url]').forEach(b=>b.onclick=()=>copy(list[+b.dataset.url].url));
+  renderPlan();renderGameBar();
+}
+
+/* ---------- spellenbalk ---------- */
+const countFor=id=>library.filter(e=>entryGame(e)===id).length;
+function setActiveGame(id){
+  activeGame=id;store.set('active',id);
+  $('#bGame').value=id;renderGameBar();renderPlan();renderLibrary();
+}
+function moveGame(id,dir){
+  const i=gameOrder.indexOf(id),j=i+dir;if(j<0||j>=gameOrder.length)return;
+  [gameOrder[i],gameOrder[j]]=[gameOrder[j],gameOrder[i]];store.set('order',gameOrder);renderGameBar();
+}
+function renderGameBar(){
+  const bar=$('#gameBar');
+  const games=[...orderedGames(orderMode),GENERAL];
+  bar.innerHTML='<span class="lbl">Spel:</span>'+games.map(g=>{
+    const fixed=g===GENERAL,hid=hiddenGames.includes(g.id),n=countFor(g.id);
+    return `<span class="gtab ${g.id===activeGame?'on':''} ${hid?'hid':''}" data-g="${g.id}" ${!fixed?'draggable="true"':''} role="button" tabindex="0" title="${fixed?'':'Sleep om de volgorde te veranderen'}">`+
+      (orderMode&&!fixed?`<button class="mv" data-mv="-1" title="Naar links">◀</button>`:'')+
+      `${esc(g.name)}${n?` <span class="cnt">${n}</span>`:''}`+
+      (orderMode&&!fixed?`<button class="mv" data-mv="1" title="Naar rechts">▶</button><button class="mv" data-hide title="${hid?'Tonen':'Verbergen'}">${hid?'👁':'✕'}</button>`:'')+
+      `</span>`;
+  }).join('')+'<span class="sp"></span>'+
+    (orderMode?'<button class="btn" id="gReset">Standaardvolgorde</button>':'')+
+    `<button class="btn ${orderMode?'accent':''}" id="gOrder">${orderMode?'Klaar':'↔ Volgorde'}</button>`;
+  $$('.gtab',bar).forEach(el=>{
+    const id=el.dataset.g;
+    el.onclick=e=>{
+      const mv=e.target.closest('[data-mv]'),hd=e.target.closest('[data-hide]');
+      if(mv){e.stopPropagation();moveGame(id,+mv.dataset.mv);return;}
+      if(hd){e.stopPropagation();hiddenGames=hiddenGames.includes(id)?hiddenGames.filter(x=>x!==id):[...hiddenGames,id];store.set('hidden',hiddenGames);renderGameBar();return;}
+      setActiveGame(id);
+    };
+    el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();setActiveGame(id);}};
+    if(id===GENERAL.id)return;
+    el.ondragstart=e=>{e.dataTransfer.setData('text/x-game',id);e.dataTransfer.effectAllowed='move';el.classList.add('drag');};
+    el.ondragend=()=>el.classList.remove('drag');
+    el.ondragover=e=>{if([...e.dataTransfer.types].includes('text/x-game')){e.preventDefault();e.stopPropagation();el.classList.add('over');}};
+    el.ondragleave=()=>el.classList.remove('over');
+    el.ondrop=e=>{
+      const from=e.dataTransfer.getData('text/x-game');el.classList.remove('over');
+      if(!from||from===id)return;e.preventDefault();e.stopPropagation();
+      const r=el.getBoundingClientRect(),after=e.clientX>r.left+r.width/2;
+      gameOrder=gameOrder.filter(x=>x!==from);
+      gameOrder.splice(gameOrder.indexOf(id)+(after?1:0),0,from);
+      store.set('order',gameOrder);renderGameBar();
+    };
+  });
+  $('#gOrder').onclick=()=>{orderMode=!orderMode;renderGameBar();};
+  const rs=$('#gReset');if(rs)rs.onclick=()=>{gameOrder=[...DEFAULT_ORDER];hiddenGames=[];store.set('order',gameOrder);store.set('hidden',[]);renderGameBar();};
+}
+
+/* ---------- spelplan: welke muziek heeft dit spel nodig ---------- */
+let planOpen=store.get('planOpen',true);
+function assignSlot(t,gameId,slotId){
+  const sl=gameById(gameId).slots.find(s=>s.id===slotId);
+  t.game=gameId;t.slot=slotId||'';
+  if(sl){
+    t.category=sl.cat;t.loop=sl.loop;
+    if(!sl.loop&&t.opts.preset==='loop')t.opts={...t.opts,...PRESETS.stinger,preset:'stinger'};
+    if(sl.loop&&t.opts.preset==='stinger')t.opts={...t.opts,...PRESETS.loop,preset:'loop'};
+  }
+  invalidate(t);renderEditor();renderList();renderPlan();
+}
+function slotEntries(gid,sid){return library.filter(e=>entryGame(e)===gid&&e.slot===sid);}
+function renderPlan(){
+  const P=$('#plan');if(!P)return;
+  const g=gameById(activeGame),t=cur();
+  const pages=g.repo?`https://${cfg.owner.toLowerCase()}.github.io/${g.repo}/`:'';
+  const filled=g.slots.filter(s=>slotEntries(g.id,s.id).length).length;
+  const work=tracks.filter(x=>x.game===g.id&&x.slot);
+  let h=`<div class="plan-head"><div class="grow"><h2>${esc(g.name)}</h2><p>${esc(g.desc)}</p>`+
+    (g.slots.length?`<div class="prog-sum">${filled} van ${g.slots.length} muziekplekken gevuld${work.length?` · ${work.length} in bewerking`:''} · <button class="plan-toggle" id="planTog">${planOpen?'inklappen':'toon alle plekken'}</button></div>`:'')+
+    `</div>`+
+    (pages?`<a class="btn" href="${pages}" target="_blank" rel="noopener">▶ Speel</a><a class="btn" href="https://github.com/${esc(cfg.owner)}/${esc(g.repo)}" target="_blank" rel="noopener">Repo</a>`:'')+
+    (g.slots.length?`<button class="btn" id="planJson" title="JSON met per plek het MP3-adres en de looppunten">Koppelbestand kopiëren</button>`:'')+
+    `</div>`;
+  if(g.note&&planOpen)h+=`<div class="note" style="max-width:none;margin-top:0">${esc(g.note)}</div>`;
+  if(g.slots.length&&planOpen){
+    h+='<div class="slots">'+g.slots.map(s=>{
+      const ent=slotEntries(g.id,s.id),inWork=tracks.filter(x=>x.game===g.id&&x.slot===s.id);
+      const st=ent.length?`<span class="badge ok">✓ ${ent.length}</span>`:inWork.length?'<span class="badge up">in bewerking</span>':'<span class="badge">leeg</span>';
+      return `<div class="slot ${ent.length?'done':''}">
+        <div class="t">${esc(s.label)} ${st}</div>
+        <div class="h"><span class="badge">${esc(catLabel(s.cat))}</span> ${s.loop?'🔁 loop':'▶ eenmalig'} · <code>${esc(s.id)}</code></div>
+        ${s.hint?`<div class="h">${esc(s.hint)}</div>`:''}
+        ${ent.length?`<audio controls preload="none" src="${esc(rawUrl(ent[ent.length-1].file))}"></audio><div class="h">${esc(ent[ent.length-1].name)}${ent.length>1?` (+${ent.length-1} andere)`:''}</div>`:''}
+        <div class="a">${t&&t.buffer?`<button class="btn" data-assign="${esc(s.id)}" title="Koppel “${esc(t.name)}” aan deze plek">＋ Gebruik “${esc(t.name.length>18?t.name.slice(0,17)+'…':t.name)}”</button>`:''}</div>
+      </div>`;}).join('')+'</div>';
+    if(!(t&&t.buffer))h+='<p class="muted" style="margin:8px 0 0">Voeg hieronder een opname toe en koppel die met één klik aan een plek.</p>';
+  }
+  P.innerHTML=h;
+  const tg=$('#planTog');if(tg)tg.onclick=()=>{planOpen=!planOpen;store.set('planOpen',planOpen);renderPlan();};
+  const pj=$('#planJson');if(pj)pj.onclick=()=>{
+    const out={game:g.name,repo:g.repo,updated:new Date().toISOString(),tracks:{}};
+    g.slots.forEach(s=>{const e=slotEntries(g.id,s.id).pop();if(e)out.tracks[s.id]={url:e.url,loop:e.loop,loopStart:e.loopStart,loopEnd:e.loopEnd,name:e.name};});
+    if(!Object.keys(out.tracks).length){toast('Nog geen geüploade muziek voor '+g.name);return;}
+    copy(JSON.stringify(out,null,2));
+  };
+  $$('[data-assign]',P).forEach(b=>b.onclick=()=>{const t=cur();if(!t)return;assignSlot(t,g.id,b.dataset.assign);toast(`“${t.name}” → ${g.slots.find(s=>s.id===b.dataset.assign).label}`);});
 }
 
 /* ---------- setup ---------- */
 function fillFilters(){
   $('#bCat').innerHTML=opt('','Alle categorieën')+CATS.map(c=>opt(c.id,c.label)).join('');
-  $('#bGame').innerHTML=opt('','Alle spellen')+gameList().map(g=>opt(g,g)).join('');
+  $('#bGame').innerHTML=opt('','Alle spellen')+[...orderedGames(true),GENERAL].map(g=>opt(g.id,g.name,g.id===activeGame)).join('');
 }
 function fillGithub(){
   $('#gOwner').value=cfg.owner;$('#gRepo').value=cfg.repo;$('#gBranch').value=cfg.branch;$('#gFolder').value=cfg.folder;
-  $('#gManifest').value=cfg.manifest;$('#gMax').value=cfg.maxMB;$('#gGames').value=cfg.games;$('#gToken').value=cfg.token;$('#gRemember').checked=cfg.remember;
+  $('#gManifest').value=cfg.manifest;$('#gMax').value=cfg.maxMB;$('#gToken').value=cfg.token;$('#gRemember').checked=cfg.remember;
   $('#pagesHint').textContent=`https://${cfg.owner.toLowerCase()}.github.io/${cfg.repo}/${trimSlash(cfg.folder)}/…`;
 }
 $('#gSave').onclick=()=>{
   Object.assign(cfg,{owner:$('#gOwner').value.trim(),repo:$('#gRepo').value.trim(),branch:$('#gBranch').value.trim()||'main',
     folder:trimSlash($('#gFolder').value)||'audio',manifest:trimSlash($('#gManifest').value)||'audio/muziek.json',
-    maxMB:Math.max(0.5,+$('#gMax').value||6),games:$('#gGames').value,token:$('#gToken').value.trim(),remember:$('#gRemember').checked});
+    maxMB:Math.max(0.5,+$('#gMax').value||6),token:$('#gToken').value.trim(),remember:$('#gRemember').checked});
   saveCfg();fillGithub();fillFilters();renderEditor();toast('Opgeslagen');
 };
 $('#gTest').onclick=async()=>{
@@ -844,7 +1086,7 @@ $('#tunerBtn').onclick=()=>{
   if(!tab)toast('Pop-up geblokkeerd — sta pop-ups toe voor deze site.',4000);
 };
 
-fillGithub();fillFilters();renderList();
+fillGithub();fillFilters();renderGameBar();renderList();loadLibrary();
 </script>
 </body>
 </html>
